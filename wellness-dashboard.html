@@ -18,6 +18,9 @@
     <!-- Chart.js para gráficos -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 
+    <!-- Supabase Client -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
     <style>
         /* Principios HIG: Tipografía clara y escalada */
         body {
@@ -60,6 +63,14 @@
         const { useState, useEffect, useMemo, useRef } = React;
 
         // ============================================
+        // SUPABASE INITIALIZATION
+        // ============================================
+
+        const SUPABASE_URL = 'https://xladlmxuojiutwmddlpe.supabase.co';
+        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhsYWRsbXh1b2ppdXR3bWRkbHBlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjIxOTMyNzgsImV4cCI6MjA3Nzc2OTI3OH0.sn7Qxi1JbGlG1XVQChRmtr3WEiCrw69VRhWA3m914BE';
+        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+        // ============================================
         // CUSTOM HOOKS
         // ============================================
 
@@ -84,6 +95,155 @@
             }, [key, value]);
 
             return [value, setValue];
+        }
+
+        // Hook para Supabase con sincronización en la nube
+        function useSupabase(tableName, initialValue, userId) {
+            const [value, setValue] = useState(initialValue);
+            const [loading, setLoading] = useState(true);
+
+            // Cargar datos al montar
+            useEffect(() => {
+                if (!userId) {
+                    setLoading(false);
+                    return;
+                }
+
+                loadFromSupabase();
+            }, [userId, tableName]);
+
+            const loadFromSupabase = async () => {
+                try {
+                    if (tableName === 'wellness_currentWeek') {
+                        const { data, error } = await supabase
+                            .from('wellness_weeks')
+                            .select('*')
+                            .eq('user_id', userId)
+                            .is('archived_date', null)
+                            .order('created_at', { ascending: false })
+                            .limit(1)
+                            .single();
+
+                        if (error && error.code !== 'PGRST116') {
+                            console.error('Error loading current week:', error);
+                        }
+                        if (data) {
+                            setValue(dbToAppFormat(data));
+                        }
+                    } else if (tableName === 'wellness_historical') {
+                        const { data, error } = await supabase
+                            .from('wellness_weeks')
+                            .select('*')
+                            .eq('user_id', userId)
+                            .not('archived_date', 'is', null)
+                            .order('year', { ascending: false })
+                            .order('week_number', { ascending: false });
+
+                        if (error) {
+                            console.error('Error loading historical:', error);
+                        }
+                        if (data) {
+                            setValue(data.map(dbToAppFormat));
+                        }
+                    } else if (tableName === 'wellness_config') {
+                        const { data, error } = await supabase
+                            .from('wellness_config')
+                            .select('*')
+                            .eq('user_id', userId)
+                            .single();
+
+                        if (error && error.code !== 'PGRST116') {
+                            console.error('Error loading config:', error);
+                        }
+                        if (data) {
+                            setValue({ nombre: data.nombre, estatura: data.estatura });
+                        }
+                    }
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            // Guardar a Supabase cuando value cambia
+            useEffect(() => {
+                if (!userId || loading) return;
+
+                const saveToSupabase = async () => {
+                    try {
+                        if (tableName === 'wellness_currentWeek') {
+                            const dbData = appToDbFormat(value, userId);
+                            const { error } = await supabase
+                                .from('wellness_weeks')
+                                .upsert(dbData, {
+                                    onConflict: 'user_id,week_number,year'
+                                });
+
+                            if (error) console.error('Error saving week:', error);
+                        } else if (tableName === 'wellness_config') {
+                            const { error } = await supabase
+                                .from('wellness_config')
+                                .upsert({
+                                    user_id: userId,
+                                    ...value,
+                                    updated_at: new Date().toISOString()
+                                }, {
+                                    onConflict: 'user_id'
+                                });
+
+                            if (error) console.error('Error saving config:', error);
+                        }
+                    } catch (error) {
+                        console.error('Save error:', error);
+                    }
+                };
+
+                const timer = setTimeout(saveToSupabase, 1000);
+                return () => clearTimeout(timer);
+            }, [value, userId, tableName, loading]);
+
+            return [value, setValue, loading];
+        }
+
+        // Convertir formato DB a formato App
+        function dbToAppFormat(dbWeek) {
+            return {
+                weekNumber: dbWeek.week_number,
+                year: dbWeek.year,
+                startDate: dbWeek.start_date,
+                peso: dbWeek.peso || '',
+                cintura: dbWeek.cintura || '',
+                estatura: dbWeek.estatura || '',
+                lunes: dbWeek.lunes || getInitialDayData('lunes'),
+                martes: dbWeek.martes || getInitialDayData('martes'),
+                miercoles: dbWeek.miercoles || getInitialDayData('miercoles'),
+                jueves: dbWeek.jueves || getInitialDayData('jueves'),
+                viernes: dbWeek.viernes || getInitialDayData('viernes'),
+                sabado: dbWeek.sabado || getInitialDayData('sabado'),
+                domingo: dbWeek.domingo || getInitialDayData('domingo'),
+                archivedDate: dbWeek.archived_date
+            };
+        }
+
+        // Convertir formato App a formato DB
+        function appToDbFormat(appWeek, userId) {
+            return {
+                user_id: userId,
+                week_number: appWeek.weekNumber,
+                year: appWeek.year,
+                start_date: appWeek.startDate,
+                peso: appWeek.peso || null,
+                cintura: appWeek.cintura || null,
+                estatura: appWeek.estatura || null,
+                lunes: appWeek.lunes,
+                martes: appWeek.martes,
+                miercoles: appWeek.miercoles,
+                jueves: appWeek.jueves,
+                viernes: appWeek.viernes,
+                sabado: appWeek.sabado,
+                domingo: appWeek.domingo,
+                archived_date: appWeek.archivedDate || null,
+                updated_at: new Date().toISOString()
+            };
         }
 
         // ============================================
@@ -1321,11 +1481,184 @@
             );
         }
 
-        // Componente Principal
+        // ============================================
+        // AUTHENTICATION COMPONENT
+        // ============================================
+
+        function AuthForm({ onAuthSuccess }) {
+            const [loading, setLoading] = useState(false);
+            const [isLogin, setIsLogin] = useState(true);
+            const [email, setEmail] = useState('');
+            const [password, setPassword] = useState('');
+            const [error, setError] = useState('');
+
+            const handleAuth = async (e) => {
+                e.preventDefault();
+                setLoading(true);
+                setError('');
+
+                try {
+                    if (isLogin) {
+                        const { data, error } = await supabase.auth.signInWithPassword({
+                            email,
+                            password
+                        });
+                        if (error) throw error;
+                        onAuthSuccess(data.user);
+                    } else {
+                        const { data, error } = await supabase.auth.signUp({
+                            email,
+                            password
+                        });
+                        if (error) throw error;
+                        alert('¡Registro exitoso! Por favor inicia sesión.');
+                        setIsLogin(true);
+                    }
+                } catch (error) {
+                    setError(error.message);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            return (
+                <div className="min-h-screen bg-gradient-to-br from-blue-50 to-purple-50 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-xl shadow-xl p-8 max-w-md w-full">
+                        <h1 className="text-3xl font-bold text-gray-800 mb-2 text-center">
+                            ✨ Wellness Dashboard
+                        </h1>
+                        <p className="text-gray-600 text-center mb-6">
+                            {isLogin ? 'Inicia sesión para continuar' : 'Crea tu cuenta'}
+                        </p>
+
+                        <form onSubmit={handleAuth} className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                    Email
+                                </label>
+                                <input
+                                    type="email"
+                                    value={email}
+                                    onChange={(e) => setEmail(e.target.value)}
+                                    required
+                                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    placeholder="tu@email.com"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                    Contraseña
+                                </label>
+                                <input
+                                    type="password"
+                                    value={password}
+                                    onChange={(e) => setPassword(e.target.value)}
+                                    required
+                                    minLength={6}
+                                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    placeholder="Mínimo 6 caracteres"
+                                />
+                            </div>
+
+                            {error && (
+                                <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm">
+                                    {error}
+                                </div>
+                            )}
+
+                            <button
+                                type="submit"
+                                disabled={loading}
+                                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg transition-colors disabled:opacity-50"
+                            >
+                                {loading ? 'Procesando...' : (isLogin ? 'Iniciar Sesión' : 'Registrarse')}
+                            </button>
+                        </form>
+
+                        <div className="mt-4 text-center">
+                            <button
+                                onClick={() => setIsLogin(!isLogin)}
+                                className="text-blue-600 hover:text-blue-700 text-sm font-medium"
+                            >
+                                {isLogin ? '¿No tienes cuenta? Regístrate' : '¿Ya tienes cuenta? Inicia sesión'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // ============================================
+        // COMPONENTE PRINCIPAL
+        // ============================================
+
         function App() {
-            const [currentWeek, setCurrentWeek] = useLocalStorage('wellness_currentWeek', getInitialWeekData());
-            const [historicalData, setHistoricalData] = useLocalStorage('wellness_historical', []);
-            const [userConfig, setUserConfig] = useLocalStorage('wellness_config', { estatura: '', nombre: '' });
+            // Estado de autenticación
+            const [user, setUser] = useState(null);
+            const [authLoading, setAuthLoading] = useState(true);
+
+            // Verificar autenticación al montar
+            useEffect(() => {
+                supabase.auth.getSession().then(({ data: { session } }) => {
+                    setUser(session?.user ?? null);
+                    setAuthLoading(false);
+                });
+
+                const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+                    setUser(session?.user ?? null);
+                });
+
+                return () => subscription.unsubscribe();
+            }, []);
+
+            // Datos del usuario (usar Supabase si está autenticado, localStorage si no)
+            const [currentWeek, setCurrentWeek, weekLoading] = user
+                ? useSupabase('wellness_currentWeek', getInitialWeekData(), user.id)
+                : [useLocalStorage('wellness_currentWeek', getInitialWeekData())[0], useLocalStorage('wellness_currentWeek', getInitialWeekData())[1], false];
+
+            const [historicalData, setHistoricalData, historyLoading] = user
+                ? useSupabase('wellness_historical', [], user.id)
+                : [useLocalStorage('wellness_historical', [])[0], useLocalStorage('wellness_historical', [])[1], false];
+
+            const [userConfig, setUserConfig, configLoading] = user
+                ? useSupabase('wellness_config', { estatura: '', nombre: '' }, user.id)
+                : [useLocalStorage('wellness_config', { estatura: '', nombre: '' })[0], useLocalStorage('wellness_config', { estatura: '', nombre: '' })[1], false];
+
+            // Logout function
+            const handleLogout = async () => {
+                await supabase.auth.signOut();
+                setUser(null);
+            };
+
+            // Mostrar pantalla de carga mientras verifica autenticación
+            if (authLoading) {
+                return (
+                    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+                        <div className="text-center">
+                            <div className="text-4xl mb-4">⏳</div>
+                            <div className="text-gray-600">Cargando...</div>
+                        </div>
+                    </div>
+                );
+            }
+
+            // Mostrar login si no está autenticado
+            if (!user) {
+                return <AuthForm onAuthSuccess={setUser} />;
+            }
+
+            // Mostrar pantalla de carga mientras carga datos
+            if (weekLoading || historyLoading || configLoading) {
+                return (
+                    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+                        <div className="text-center">
+                            <div className="text-4xl mb-4">📊</div>
+                            <div className="text-gray-600">Cargando tus datos...</div>
+                        </div>
+                    </div>
+                );
+            }
 
             // Sistema de navegación de páginas
             const [currentPage, setCurrentPage] = useState('home'); // 'home', 'stats', 'charts'
@@ -1560,8 +1893,19 @@
                                     )}
                                     <div>
                                         <h1 className="text-4xl font-bold text-gray-800">✨ Estilo de vida</h1>
-                                        <p className="text-sm text-gray-600">Semana {currentWeek.weekNumber}</p>
+                                        <p className="text-sm text-gray-600">
+                                            Semana {currentWeek.weekNumber}
+                                            {user && <span className="ml-3 text-blue-600">• {user.email}</span>}
+                                        </p>
                                     </div>
+                                    {user && (
+                                        <button
+                                            onClick={handleLogout}
+                                            className="text-sm text-gray-600 hover:text-gray-800 underline"
+                                        >
+                                            Cerrar Sesión
+                                        </button>
+                                    )}
                                 </div>
 
                                 {/* Navegación Principal */}
