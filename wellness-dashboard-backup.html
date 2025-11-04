@@ -1,0 +1,1463 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard de Bienestar Personal</title>
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- React 18 -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+
+    <!-- Babel Standalone -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- Chart.js para gráficos -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+    <style>
+        /* Principios HIG: Tipografía clara y escalada */
+        body {
+            font-size: 16px; /* Base mínimo HIG */
+            line-height: 1.4;
+            overflow: hidden; /* Evitar scroll en body */
+        }
+
+        /* Touch targets mínimo 44px (HIG) */
+        button, input[type="checkbox"], .clickable {
+            min-height: 44px;
+            min-width: 44px;
+        }
+
+        /* Focus visible (HIG Accesibilidad) */
+        button:focus-visible, input:focus-visible {
+            outline: 2px solid #2196F3;
+            outline-offset: 2px;
+        }
+
+        /* Transiciones suaves (HIG) */
+        * {
+            transition: all 0.2s ease;
+        }
+
+        /* Grid de 8px spacing (HIG) */
+        .gap-hig-sm { gap: 8px; }
+        .gap-hig-md { gap: 12px; }
+        .gap-hig-lg { gap: 16px; }
+        .gap-hig-xl { gap: 24px; }
+
+        /* Contraste adecuado (HIG) */
+        .text-primary { color: #212121; }
+        .text-secondary { color: #757575; }
+
+        /* Layout sin scroll */
+        .main-container {
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .content-area {
+            flex: 1;
+            overflow-y: auto;
+            overflow-x: hidden;
+        }
+
+        /* Compactar elementos */
+        .compact-card {
+            padding: 12px !important;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 text-primary">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo, useRef } = React;
+
+        // ============================================
+        // CUSTOM HOOKS
+        // ============================================
+
+        // Hook para localStorage con auto-guardado
+        function useLocalStorage(key, initialValue) {
+            const [value, setValue] = useState(() => {
+                try {
+                    const item = window.localStorage.getItem(key);
+                    return item ? JSON.parse(item) : initialValue;
+                } catch (error) {
+                    console.error('Error loading from localStorage:', error);
+                    return initialValue;
+                }
+            });
+
+            useEffect(() => {
+                try {
+                    window.localStorage.setItem(key, JSON.stringify(value));
+                } catch (error) {
+                    console.error('Error saving to localStorage:', error);
+                }
+            }, [key, value]);
+
+            return [value, setValue];
+        }
+
+        // ============================================
+        // UTILIDADES
+        // ============================================
+
+        function getWeekNumber(date) {
+            const d = new Date(date);
+            d.setHours(0, 0, 0, 0);
+            d.setDate(d.getDate() + 4 - (d.getDay() || 7));
+            const yearStart = new Date(d.getFullYear(), 0, 1);
+            return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+        }
+
+        function calculateBMI(weight, height) {
+            if (!weight || !height) return null;
+            const heightM = height / 100;
+            return (weight / (heightM * heightM)).toFixed(1);
+        }
+
+        function getBMICategory(bmi) {
+            if (!bmi) return '';
+            if (bmi < 18.5) return 'Bajo peso';
+            if (bmi < 25) return 'Normal';
+            if (bmi < 30) return 'Sobrepeso';
+            if (bmi < 35) return 'Obesidad I';
+            if (bmi < 40) return 'Obesidad II';
+            return 'Obesidad III';
+        }
+
+        function calculateFoodQuality(weekData) {
+            let totalPoints = 0;
+            let totalMeals = 0;
+
+            const days = ['lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado', 'domingo'];
+            days.forEach(day => {
+                ['desayuno', 'almuerzo', 'cena'].forEach(meal => {
+                    const quality = weekData[day][meal];
+                    if (quality !== 'pendiente') {
+                        totalMeals++;
+                        if (quality === 'bueno') totalPoints += 3;
+                        else if (quality === 'regular') totalPoints += 2;
+                        else if (quality === 'malo') totalPoints += 1;
+                    }
+                });
+            });
+
+            if (totalMeals === 0) return 0;
+            return Math.round((totalPoints / (totalMeals * 3)) * 100);
+        }
+
+        function getFoodQualityMessage(percentage) {
+            if (percentage >= 85) return { text: '¡Excelente calidad!', emoji: '🌟', color: 'text-green-600' };
+            if (percentage >= 70) return { text: 'Muy buena semana', emoji: '💪', color: 'text-blue-600' };
+            if (percentage >= 55) return { text: 'Bien, puedes mejorar', emoji: '👍', color: 'text-yellow-600' };
+            return { text: 'Enfócate en calidad', emoji: '⚠️', color: 'text-orange-600' };
+        }
+
+        function getInitialDayData(type) {
+            return {
+                tipo: type,
+                ejercicio: false,
+                movimiento: false,
+                pausa1: false,
+                pausa2: false,
+                aireLibre: false,
+                familia: false,
+                sueno: false,
+                mealPrep: false,
+                prep: false,
+                desayuno: 'pendiente',
+                almuerzo: 'pendiente',
+                cena: 'pendiente',
+                vasos: 0
+            };
+        }
+
+        function getInitialWeekData() {
+            const today = new Date();
+            return {
+                weekNumber: getWeekNumber(today),
+                year: today.getFullYear(),
+                startDate: today.toISOString(),
+                peso: '',
+                cintura: '',
+                estatura: '',
+                lunes: getInitialDayData('natacion'),
+                martes: getInitialDayData('fuerza'),
+                miercoles: getInitialDayData('descanso'),
+                jueves: getInitialDayData('natacion'),
+                viernes: getInitialDayData('fuerza'),
+                sabado: getInitialDayData('finDeSemana'),
+                domingo: getInitialDayData('finDeSemana')
+            };
+        }
+
+        // ============================================
+        // COMPONENTES
+        // ============================================
+
+        // Componente de Botón (HIG compliant)
+        function Button({ children, onClick, variant = 'primary', className = '', disabled = false, ariaLabel }) {
+            const baseClasses = "min-h-[48px] px-6 py-3 rounded-lg font-semibold transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2";
+
+            const variants = {
+                primary: "bg-blue-500 hover:bg-blue-600 text-white focus:ring-blue-500 disabled:bg-blue-300",
+                secondary: "bg-gray-200 hover:bg-gray-300 text-gray-800 focus:ring-gray-500 disabled:bg-gray-100",
+                success: "bg-green-500 hover:bg-green-600 text-white focus:ring-green-500 disabled:bg-green-300",
+                danger: "bg-red-500 hover:bg-red-600 text-white focus:ring-red-500 disabled:bg-red-300",
+                warning: "bg-orange-500 hover:bg-orange-600 text-white focus:ring-orange-500 disabled:bg-orange-300"
+            };
+
+            return (
+                <button
+                    onClick={onClick}
+                    disabled={disabled}
+                    aria-label={ariaLabel || children}
+                    className={`${baseClasses} ${variants[variant]} ${className} disabled:cursor-not-allowed disabled:opacity-60`}
+                >
+                    {children}
+                </button>
+            );
+        }
+
+        // Componente de Input (HIG compliant)
+        function Input({ type = 'text', value, onChange, placeholder, label, step, min, max, className = '' }) {
+            const inputId = `input-${label?.replace(/\s/g, '-')}`;
+
+            return (
+                <div className="flex flex-col gap-2">
+                    {label && (
+                        <label htmlFor={inputId} className="text-sm font-medium text-gray-700">
+                            {label}
+                        </label>
+                    )}
+                    <input
+                        id={inputId}
+                        type={type}
+                        value={value}
+                        onChange={onChange}
+                        placeholder={placeholder}
+                        step={step}
+                        min={min}
+                        max={max}
+                        className={`min-h-[44px] px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${className}`}
+                        aria-label={label || placeholder}
+                    />
+                </div>
+            );
+        }
+
+        // Checkbox Toggle (HIG compliant)
+        function CheckboxToggle({ checked, onChange, label }) {
+            return (
+                <button
+                    onClick={() => onChange(!checked)}
+                    className={`flex items-center gap-2 min-h-[44px] px-4 py-2 rounded-lg transition-all ${
+                        checked ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'
+                    } hover:shadow-md focus:outline-none focus:ring-2 focus:ring-blue-500`}
+                    role="checkbox"
+                    aria-checked={checked}
+                    aria-label={label}
+                >
+                    <span className="text-xl">{checked ? '✓' : '○'}</span>
+                    <span className="text-sm font-medium">{label}</span>
+                </button>
+            );
+        }
+
+        // Botón de calidad de comida
+        function MealQualityButton({ quality, onChange, mealName }) {
+            const states = {
+                pendiente: { emoji: '⏸️', text: 'Pendiente', color: 'bg-gray-200 text-gray-600' },
+                bueno: { emoji: '✅', text: 'Saludable', color: 'bg-green-100 text-green-700' },
+                regular: { emoji: '⚠️', text: 'Regular', color: 'bg-yellow-100 text-yellow-700' },
+                malo: { emoji: '❌', text: 'Malo', color: 'bg-red-100 text-red-700' }
+            };
+
+            const cycleQuality = () => {
+                const order = ['pendiente', 'bueno', 'regular', 'malo'];
+                const currentIndex = order.indexOf(quality);
+                const nextIndex = (currentIndex + 1) % order.length;
+                onChange(order[nextIndex]);
+            };
+
+            const current = states[quality];
+
+            return (
+                <button
+                    onClick={cycleQuality}
+                    className={`min-h-[48px] px-4 py-2 rounded-lg font-medium transition-all hover:shadow-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${current.color}`}
+                    aria-label={`${mealName}: ${current.text}`}
+                >
+                    <span className="text-xl mr-2">{current.emoji}</span>
+                    <span>{current.text}</span>
+                </button>
+            );
+        }
+
+        // Contador de agua
+        function WaterCounter({ vasos, onChange, goal = 7, dayName }) {
+            const percentage = Math.min((vasos / goal) * 100, 100);
+            const isComplete = vasos >= goal;
+
+            return (
+                <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium text-gray-700">💧 Agua</span>
+                        <span className={`text-sm font-bold ${isComplete ? 'text-cyan-600' : 'text-gray-600'}`}>
+                            {vasos}/{goal} vasos
+                        </span>
+                    </div>
+
+                    {/* Barra de progreso */}
+                    <div className="w-full bg-gray-200 rounded-full h-2">
+                        <div
+                            className={`h-2 rounded-full transition-all duration-300 ${isComplete ? 'bg-cyan-500' : 'bg-cyan-300'}`}
+                            style={{ width: `${percentage}%` }}
+                        />
+                    </div>
+
+                    {/* Botones de control */}
+                    <div className="flex gap-2">
+                        <Button
+                            variant="secondary"
+                            onClick={() => onChange(Math.max(0, vasos - 1))}
+                            className="flex-1 min-h-[44px] text-lg"
+                            ariaLabel={`Reducir vasos de agua para ${dayName}`}
+                        >
+                            -
+                        </Button>
+                        <Button
+                            variant="primary"
+                            onClick={() => onChange(Math.min(15, vasos + 1))}
+                            className="flex-1 min-h-[44px] text-lg"
+                            ariaLabel={`Aumentar vasos de agua para ${dayName}`}
+                        >
+                            +
+                        </Button>
+                        <Button
+                            variant="secondary"
+                            onClick={() => onChange(0)}
+                            className="min-h-[44px] px-3"
+                            ariaLabel={`Reiniciar contador de agua para ${dayName}`}
+                        >
+                            Reset
+                        </Button>
+                    </div>
+                </div>
+            );
+        }
+
+        // Selector de Día (HIG compliant)
+        function DaySelector({ selectedDay, onDayChange }) {
+            const days = [
+                { key: 'lunes', label: 'Lunes', icon: '🏊' },
+                { key: 'martes', label: 'Martes', icon: '💪' },
+                { key: 'miercoles', label: 'Miércoles', icon: '🚶' },
+                { key: 'jueves', label: 'Jueves', icon: '🏊' },
+                { key: 'viernes', label: 'Viernes', icon: '💪' },
+                { key: 'sabado', label: 'Sábado', icon: '🌳' },
+                { key: 'domingo', label: 'Domingo', icon: '📅' }
+            ];
+
+            const currentIndex = days.findIndex(d => d.key === selectedDay);
+
+            const goToPrevDay = () => {
+                const newIndex = currentIndex === 0 ? 6 : currentIndex - 1;
+                onDayChange(days[newIndex].key);
+            };
+
+            const goToNextDay = () => {
+                const newIndex = currentIndex === 6 ? 0 : currentIndex + 1;
+                onDayChange(days[newIndex].key);
+            };
+
+            return (
+                <div className="bg-white rounded-xl shadow-md p-6 mb-6">
+                    {/* Navegación con flechas */}
+                    <div className="flex items-center justify-between gap-4 mb-4">
+                        <Button
+                            variant="secondary"
+                            onClick={goToPrevDay}
+                            className="min-w-[48px] px-4"
+                            ariaLabel="Día anterior"
+                        >
+                            ← Anterior
+                        </Button>
+
+                        <div className="text-center flex-1">
+                            <div className="text-4xl mb-2">{days[currentIndex].icon}</div>
+                            <h2 className="text-2xl font-bold text-gray-800">
+                                {days[currentIndex].label}
+                            </h2>
+                        </div>
+
+                        <Button
+                            variant="secondary"
+                            onClick={goToNextDay}
+                            className="min-w-[48px] px-4"
+                            ariaLabel="Día siguiente"
+                        >
+                            Siguiente →
+                        </Button>
+                    </div>
+
+                    {/* Dropdown para selección rápida */}
+                    <div className="mt-4">
+                        <label htmlFor="day-select" className="block text-sm font-medium text-gray-700 mb-2">
+                            Ir a día específico:
+                        </label>
+                        <select
+                            id="day-select"
+                            value={selectedDay}
+                            onChange={(e) => onDayChange(e.target.value)}
+                            className="w-full min-h-[48px] px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white text-base"
+                            aria-label="Seleccionar día de la semana"
+                        >
+                            {days.map(day => (
+                                <option key={day.key} value={day.key}>
+                                    {day.icon} {day.label}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                </div>
+            );
+        }
+
+        // Tarjeta de Día
+        function DayCard({ dayName, dayData, onChange }) {
+            const dayConfig = {
+                lunes: { icon: '🏊', activity: 'Natación 5:00 AM', exerciseGoal: 9 },
+                martes: { icon: '💪', activity: 'Fuerza 5:00 AM', exerciseGoal: 9 },
+                miercoles: { icon: '🚶', activity: 'Descanso Activo', exerciseGoal: 7 },
+                jueves: { icon: '🏊', activity: 'Natación 5:00 AM', exerciseGoal: 9 },
+                viernes: { icon: '💪', activity: 'Fuerza 5:00 AM', exerciseGoal: 9 },
+                sabado: { icon: '🌳', activity: 'Fin de Semana', exerciseGoal: 7 },
+                domingo: { icon: '📅', activity: 'Fin de Semana', exerciseGoal: 7 }
+            };
+
+            const config = dayConfig[dayName];
+            const displayName = dayName.charAt(0).toUpperCase() + dayName.slice(1);
+
+            // Handler para cambios con logging
+            const handleChange = (field, value) => {
+                console.log(`Updating ${dayName}.${field} to:`, value);
+                const newData = { ...dayData, [field]: value };
+                console.log('New data:', newData);
+                onChange(newData);
+            };
+
+            // Calcular progreso del día
+            const calculateProgress = () => {
+                let completed = 0;
+                let total = 0;
+
+                // Actividades del día
+                const activities = ['pausa1', 'pausa2', 'familia', 'sueno'];
+                if (dayData.tipo === 'natacion' || dayData.tipo === 'fuerza') {
+                    activities.push('ejercicio');
+                }
+                if (dayData.tipo === 'descanso') {
+                    activities.push('movimiento');
+                }
+                if (dayData.tipo === 'finDeSemana') {
+                    activities.push('aireLibre');
+                    if (dayName === 'domingo') {
+                        activities.push('mealPrep', 'prep');
+                    }
+                }
+
+                activities.forEach(act => {
+                    total++;
+                    if (dayData[act]) completed++;
+                });
+
+                // Comidas (3)
+                ['desayuno', 'almuerzo', 'cena'].forEach(meal => {
+                    total++;
+                    if (dayData[meal] !== 'pendiente') completed++;
+                });
+
+                // Agua
+                total++;
+                if (dayData.vasos >= config.exerciseGoal) completed++;
+
+                return Math.round((completed / total) * 100);
+            };
+
+            const progress = calculateProgress();
+
+            return (
+                <div className="bg-white rounded-lg shadow-md p-4 border border-gray-200">
+                    {/* Header del día - Compacto */}
+                    <div className="flex items-center justify-between pb-2 mb-3 border-b border-gray-200">
+                        <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+                            <span className="text-xl">{config.icon}</span>
+                            {displayName}
+                        </h3>
+                        <div className="text-xl font-bold text-blue-600">{progress}%</div>
+                    </div>
+
+                    {/* Layout en 2 columnas */}
+                    <div className="grid grid-cols-2 gap-4">
+                        {/* Columna Izquierda: Actividades */}
+                        <div className="space-y-3">
+                            {/* Actividad principal del día - PRIMERO */}
+                    {(dayData.tipo === 'natacion' || dayData.tipo === 'fuerza') && (
+                        <div className="space-y-2">
+                            <div className="bg-blue-50 rounded-lg p-2 text-center">
+                                <p className="text-sm font-semibold text-blue-800">{config.activity}</p>
+                            </div>
+                            <CheckboxToggle
+                                checked={dayData.ejercicio}
+                                onChange={(val) => handleChange('ejercicio', val)}
+                                label="🏋️ Ejercicio completado"
+                            />
+                        </div>
+                    )}
+
+                    {dayData.tipo === 'descanso' && (
+                        <div className="space-y-2">
+                            <div className="bg-blue-50 rounded-lg p-2 text-center">
+                                <p className="text-sm font-semibold text-blue-800">{config.activity}</p>
+                            </div>
+                            <CheckboxToggle
+                                checked={dayData.movimiento}
+                                onChange={(val) => handleChange('movimiento', val)}
+                                label="🚶 Movimiento ligero"
+                            />
+                        </div>
+                    )}
+
+                    {dayData.tipo === 'finDeSemana' && (
+                        <div className="space-y-2">
+                            <div className="bg-blue-50 rounded-lg p-2 text-center">
+                                <p className="text-sm font-semibold text-blue-800">{config.activity}</p>
+                            </div>
+                            <CheckboxToggle
+                                checked={dayData.aireLibre}
+                                onChange={(val) => handleChange('aireLibre', val)}
+                                label="🌳 Actividad al aire libre"
+                            />
+                            {dayName === 'domingo' && (
+                                <>
+                                    <CheckboxToggle
+                                        checked={dayData.mealPrep}
+                                        onChange={(val) => handleChange('mealPrep', val)}
+                                        label="🍱 Meal prep"
+                                    />
+                                    <CheckboxToggle
+                                        checked={dayData.prep}
+                                        onChange={(val) => handleChange('prep', val)}
+                                        label="📋 Prep semanal"
+                                    />
+                                </>
+                            )}
+                        </div>
+                    )}
+
+                    {/* Pausas */}
+                    <div className="space-y-2 pt-3 border-t border-gray-200">
+                        <CheckboxToggle
+                            checked={dayData.pausa1}
+                            onChange={(val) => handleChange('pausa1', val)}
+                            label="⏰ Pausa 10am"
+                        />
+                        <CheckboxToggle
+                            checked={dayData.pausa2}
+                            onChange={(val) => handleChange('pausa2', val)}
+                            label="⏰ Pausa 3pm"
+                        />
+                    </div>
+
+                    {/* Alimentación */}
+                    <div className="space-y-2 pt-3 border-t border-gray-200">
+                        <p className="text-sm font-semibold text-gray-700 mb-2">Alimentación</p>
+                        <div className="space-y-2">
+                            <MealQualityButton
+                                quality={dayData.desayuno}
+                                onChange={(val) => handleChange('desayuno', val)}
+                                mealName="Desayuno"
+                            />
+                            <MealQualityButton
+                                quality={dayData.almuerzo}
+                                onChange={(val) => handleChange('almuerzo', val)}
+                                mealName="Almuerzo"
+                            />
+                            <MealQualityButton
+                                quality={dayData.cena}
+                                onChange={(val) => handleChange('cena', val)}
+                                mealName="Cena"
+                            />
+                        </div>
+                    </div>
+
+                    {/* Hidratación */}
+                    <div className="pt-3 border-t border-gray-200">
+                        <WaterCounter
+                            vasos={dayData.vasos}
+                            onChange={(val) => handleChange('vasos', val)}
+                            goal={config.exerciseGoal}
+                            dayName={displayName}
+                        />
+                    </div>
+
+                    {/* Bienestar */}
+                    <div className="space-y-2 pt-3 border-t border-gray-200">
+                        <CheckboxToggle
+                            checked={dayData.familia}
+                            onChange={(val) => handleChange('familia', val)}
+                            label="👨‍👩‍👧 Tiempo familiar"
+                        />
+                        <CheckboxToggle
+                            checked={dayData.sueno}
+                            onChange={(val) => handleChange('sueno', val)}
+                            label="🌙 Sueño adecuado"
+                        />
+                    </div>
+                </div>
+            );
+        }
+
+        // Panel de Estadísticas Mensuales
+        function MonthlyStatsPanel({ currentWeek, historicalData, userConfig }) {
+            const currentMonth = new Date().getMonth();
+            const currentYear = new Date().getFullYear();
+
+            const monthlyData = useMemo(() => {
+                // Filtrar semanas del mes actual
+                const monthWeeks = historicalData.filter(week => {
+                    const weekDate = new Date(week.startDate);
+                    return weekDate.getMonth() === currentMonth && weekDate.getFullYear() === currentYear;
+                });
+
+                if (monthWeeks.length === 0) {
+                    return null;
+                }
+
+                // Calcular estadísticas
+                let totalTrainings = 0;
+                let totalQuality = 0;
+                let totalWater = 0;
+                let totalDays = 0;
+
+                monthWeeks.forEach(week => {
+                    ['lunes', 'martes', 'jueves', 'viernes'].forEach(day => {
+                        if (week[day].ejercicio) totalTrainings++;
+                    });
+
+                    totalQuality += calculateFoodQuality(week);
+
+                    ['lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado', 'domingo'].forEach(day => {
+                        totalWater += week[day].vasos;
+                        totalDays++;
+                    });
+                });
+
+                const avgQuality = Math.round(totalQuality / monthWeeks.length);
+                const avgWater = Math.round(totalWater / totalDays);
+
+                // Progreso corporal
+                const firstWeek = monthWeeks[0];
+                const lastWeek = monthWeeks[monthWeeks.length - 1];
+
+                const pesoInicial = parseFloat(firstWeek.peso) || 0;
+                const pesoActual = parseFloat(lastWeek.peso) || 0;
+                const difPeso = pesoActual - pesoInicial;
+
+                const cinturaInicial = parseFloat(firstWeek.cintura) || 0;
+                const cinturaActual = parseFloat(lastWeek.cintura) || 0;
+                const difCintura = cinturaActual - cinturaInicial;
+
+                const estatura = parseFloat(lastWeek.estatura || userConfig.estatura) || 0;
+                const imcInicial = calculateBMI(pesoInicial, estatura);
+                const imcActual = calculateBMI(pesoActual, estatura);
+                const difIMC = imcActual - imcInicial;
+
+                return {
+                    weekCount: monthWeeks.length,
+                    totalTrainings,
+                    avgQuality,
+                    avgWater,
+                    pesoInicial,
+                    pesoActual,
+                    difPeso,
+                    cinturaInicial,
+                    cinturaActual,
+                    difCintura,
+                    imcInicial,
+                    imcActual,
+                    difIMC
+                };
+            }, [historicalData, currentMonth, currentYear, userConfig]);
+
+            if (!monthlyData) {
+                return (
+                    <div className="bg-white rounded-xl shadow-lg p-6">
+                        <h2 className="text-2xl font-bold text-gray-800 mb-4">📈 Estadísticas Mensuales</h2>
+                        <p className="text-gray-600">No hay datos suficientes. Completa al menos una semana y archívala para ver estadísticas mensuales.</p>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="bg-white rounded-xl shadow-lg p-6 space-y-6">
+                    <h2 className="text-2xl font-bold text-gray-800 mb-4">📈 Estadísticas Mensuales</h2>
+
+                    {/* Estadísticas generales */}
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        <div className="bg-blue-50 rounded-lg p-4 text-center border border-blue-200">
+                            <div className="text-3xl font-bold text-blue-700">{monthlyData.totalTrainings}</div>
+                            <div className="text-sm text-blue-600 mt-1">Entrenamientos</div>
+                        </div>
+
+                        <div className="bg-green-50 rounded-lg p-4 text-center border border-green-200">
+                            <div className="text-3xl font-bold text-green-700">{monthlyData.avgQuality}%</div>
+                            <div className="text-sm text-green-600 mt-1">Calidad Promedio</div>
+                        </div>
+
+                        <div className="bg-cyan-50 rounded-lg p-4 text-center border border-cyan-200">
+                            <div className="text-3xl font-bold text-cyan-700">{monthlyData.avgWater}</div>
+                            <div className="text-sm text-cyan-600 mt-1">Vasos/día Promedio</div>
+                        </div>
+
+                        <div className="bg-purple-50 rounded-lg p-4 text-center border border-purple-200">
+                            <div className="text-3xl font-bold text-purple-700">{monthlyData.weekCount}</div>
+                            <div className="text-sm text-purple-600 mt-1">Semanas Completas</div>
+                        </div>
+                    </div>
+
+                    {/* Progreso corporal */}
+                    <div>
+                        <h3 className="text-xl font-semibold text-gray-800 mb-4">🎯 Progreso Corporal</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            {/* Peso */}
+                            <div className="bg-gradient-to-br from-orange-50 to-orange-100 rounded-lg p-4 border border-orange-200">
+                                <div className="text-sm font-semibold text-orange-700 mb-2">Peso</div>
+                                <div className="flex items-center justify-between">
+                                    <div>
+                                        <div className="text-sm text-gray-600">Inicial</div>
+                                        <div className="text-xl font-bold text-gray-800">{monthlyData.pesoInicial.toFixed(1)} kg</div>
+                                    </div>
+                                    <div className="text-2xl">→</div>
+                                    <div>
+                                        <div className="text-sm text-gray-600">Actual</div>
+                                        <div className="text-xl font-bold text-gray-800">{monthlyData.pesoActual.toFixed(1)} kg</div>
+                                    </div>
+                                </div>
+                                <div className={`mt-2 text-center text-lg font-bold ${monthlyData.difPeso < 0 ? 'text-green-600' : 'text-orange-600'}`}>
+                                    {monthlyData.difPeso > 0 ? '+' : ''}{monthlyData.difPeso.toFixed(1)} kg
+                                    {monthlyData.difPeso < 0 && ' 🎉'}
+                                </div>
+                            </div>
+
+                            {/* Cintura */}
+                            <div className="bg-gradient-to-br from-pink-50 to-pink-100 rounded-lg p-4 border border-pink-200">
+                                <div className="text-sm font-semibold text-pink-700 mb-2">Cintura</div>
+                                <div className="flex items-center justify-between">
+                                    <div>
+                                        <div className="text-sm text-gray-600">Inicial</div>
+                                        <div className="text-xl font-bold text-gray-800">{monthlyData.cinturaInicial.toFixed(1)} cm</div>
+                                    </div>
+                                    <div className="text-2xl">→</div>
+                                    <div>
+                                        <div className="text-sm text-gray-600">Actual</div>
+                                        <div className="text-xl font-bold text-gray-800">{monthlyData.cinturaActual.toFixed(1)} cm</div>
+                                    </div>
+                                </div>
+                                <div className={`mt-2 text-center text-lg font-bold ${monthlyData.difCintura < 0 ? 'text-green-600' : 'text-pink-600'}`}>
+                                    {monthlyData.difCintura > 0 ? '+' : ''}{monthlyData.difCintura.toFixed(1)} cm
+                                    {monthlyData.difCintura < 0 && ' 🎉'}
+                                </div>
+                            </div>
+
+                            {/* IMC */}
+                            <div className="bg-gradient-to-br from-indigo-50 to-indigo-100 rounded-lg p-4 border border-indigo-200">
+                                <div className="text-sm font-semibold text-indigo-700 mb-2">IMC</div>
+                                <div className="flex items-center justify-between">
+                                    <div>
+                                        <div className="text-sm text-gray-600">Inicial</div>
+                                        <div className="text-xl font-bold text-gray-800">{monthlyData.imcInicial}</div>
+                                    </div>
+                                    <div className="text-2xl">→</div>
+                                    <div>
+                                        <div className="text-sm text-gray-600">Actual</div>
+                                        <div className="text-xl font-bold text-gray-800">{monthlyData.imcActual}</div>
+                                    </div>
+                                </div>
+                                <div className={`mt-2 text-center text-lg font-bold ${monthlyData.difIMC < 0 ? 'text-green-600' : 'text-indigo-600'}`}>
+                                    {monthlyData.difIMC > 0 ? '+' : ''}{monthlyData.difIMC}
+                                    {monthlyData.difIMC < 0 && ' 🎉'}
+                                </div>
+                                <div className="text-xs text-center text-gray-600 mt-1">
+                                    {getBMICategory(monthlyData.imcActual)}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // Componente de Gráfico Simple con Canvas
+        function SimpleChart({ type, data, title }) {
+            const canvasRef = useRef(null);
+            const chartRef = useRef(null);
+
+            useEffect(() => {
+                if (!canvasRef.current || !data || data.length === 0) return;
+
+                // Destruir gráfico anterior si existe
+                if (chartRef.current) {
+                    chartRef.current.destroy();
+                }
+
+                const ctx = canvasRef.current.getContext('2d');
+
+                chartRef.current = new Chart(ctx, {
+                    type: type,
+                    data: data,
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                display: true,
+                                position: 'bottom'
+                            }
+                        }
+                    }
+                });
+
+                return () => {
+                    if (chartRef.current) {
+                        chartRef.current.destroy();
+                    }
+                };
+            }, [type, data]);
+
+            return (
+                <div className="bg-gray-50 rounded-lg p-4">
+                    <h3 className="text-lg font-semibold text-gray-800 mb-4">{title}</h3>
+                    <div style={{ position: 'relative', height: '300px' }}>
+                        <canvas ref={canvasRef}></canvas>
+                    </div>
+                </div>
+            );
+        }
+
+        // Panel de Gráficos
+        function ChartsPanel({ currentWeek, historicalData, userConfig }) {
+            // Preparar datos para gráficos
+            const chartData = useMemo(() => {
+                const allWeeks = [...historicalData, currentWeek];
+                const last12Weeks = allWeeks.slice(-12);
+                const last8Weeks = allWeeks.slice(-8);
+
+                // Datos de peso y cintura
+                const weightWaistData = last12Weeks.map(week => ({
+                    semana: `S${week.weekNumber}`,
+                    peso: parseFloat(week.peso) || null,
+                    cintura: parseFloat(week.cintura) || null
+                })).filter(d => d.peso !== null || d.cintura !== null);
+
+                // Datos de calidad alimenticia
+                const foodQualityData = last8Weeks.map(week => {
+                    const quality = calculateFoodQuality(week);
+                    let color = '#F97316'; // naranja
+                    if (quality >= 85) color = '#10B981'; // verde
+                    else if (quality >= 70) color = '#3B82F6'; // azul
+                    else if (quality >= 55) color = '#FBBF24'; // amarillo
+
+                    return {
+                        semana: `S${week.weekNumber}`,
+                        calidad: quality,
+                        fill: color
+                    };
+                });
+
+                // Distribución de comidas (semana actual)
+                let saludables = 0, regulares = 0, malas = 0;
+                ['lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado', 'domingo'].forEach(day => {
+                    ['desayuno', 'almuerzo', 'cena'].forEach(meal => {
+                        const quality = currentWeek[day][meal];
+                        if (quality === 'bueno') saludables++;
+                        else if (quality === 'regular') regulares++;
+                        else if (quality === 'malo') malas++;
+                    });
+                });
+
+                const foodDistribution = [
+                    { name: 'Saludables', value: saludables, color: '#10B981' },
+                    { name: 'Regulares', value: regulares, color: '#FBBF24' },
+                    { name: 'Malas', value: malas, color: '#EF4444' }
+                ].filter(d => d.value > 0);
+
+                // Hidratación semanal
+                const hydrationData = ['lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado', 'domingo'].map(day => {
+                    const goal = ['lunes', 'martes', 'jueves', 'viernes'].includes(day) ? 9 : 7;
+                    const vasos = currentWeek[day].vasos;
+                    return {
+                        dia: day.charAt(0).toUpperCase() + day.slice(1, 3),
+                        vasos,
+                        meta: goal,
+                        color: vasos >= goal ? '#06B6D4' : '#9CA3AF'
+                    };
+                });
+
+                // IMC a lo largo del tiempo
+                const bmiData = last12Weeks.map(week => {
+                    const estatura = parseFloat(week.estatura || userConfig.estatura);
+                    const peso = parseFloat(week.peso);
+                    const bmi = calculateBMI(peso, estatura);
+                    return {
+                        semana: `S${week.weekNumber}`,
+                        imc: bmi ? parseFloat(bmi) : null
+                    };
+                }).filter(d => d.imc !== null);
+
+                return {
+                    weightWaistData,
+                    foodQualityData,
+                    foodDistribution,
+                    hydrationData,
+                    bmiData
+                };
+            }, [currentWeek, historicalData, userConfig]);
+
+            // Preparar datos para Chart.js
+            const weightWaistChartData = chartData.weightWaistData.length > 0 ? {
+                labels: chartData.weightWaistData.map(d => d.semana),
+                datasets: [
+                    {
+                        label: 'Peso (kg)',
+                        data: chartData.weightWaistData.map(d => d.peso),
+                        borderColor: '#F97316',
+                        backgroundColor: 'rgba(249, 115, 22, 0.1)',
+                        yAxisID: 'y',
+                    },
+                    {
+                        label: 'Cintura (cm)',
+                        data: chartData.weightWaistData.map(d => d.cintura),
+                        borderColor: '#EC4899',
+                        backgroundColor: 'rgba(236, 72, 153, 0.1)',
+                        yAxisID: 'y1',
+                    }
+                ]
+            } : null;
+
+            const foodQualityChartData = chartData.foodQualityData.length > 0 ? {
+                labels: chartData.foodQualityData.map(d => d.semana),
+                datasets: [{
+                    label: 'Calidad (%)',
+                    data: chartData.foodQualityData.map(d => d.calidad),
+                    backgroundColor: chartData.foodQualityData.map(d => d.fill),
+                }]
+            } : null;
+
+            const foodDistributionChartData = chartData.foodDistribution.length > 0 ? {
+                labels: chartData.foodDistribution.map(d => d.name),
+                datasets: [{
+                    data: chartData.foodDistribution.map(d => d.value),
+                    backgroundColor: chartData.foodDistribution.map(d => d.color),
+                }]
+            } : null;
+
+            const hydrationChartData = {
+                labels: chartData.hydrationData.map(d => d.dia),
+                datasets: [
+                    {
+                        label: 'Vasos consumidos',
+                        data: chartData.hydrationData.map(d => d.vasos),
+                        backgroundColor: chartData.hydrationData.map(d => d.color),
+                    },
+                    {
+                        label: 'Meta',
+                        data: chartData.hydrationData.map(d => d.meta),
+                        backgroundColor: '#E5E7EB',
+                    }
+                ]
+            };
+
+            const bmiChartData = chartData.bmiData.length > 0 ? {
+                labels: chartData.bmiData.map(d => d.semana),
+                datasets: [{
+                    label: 'IMC',
+                    data: chartData.bmiData.map(d => d.imc),
+                    borderColor: '#6366F1',
+                    backgroundColor: 'rgba(99, 102, 241, 0.1)',
+                    borderWidth: 3,
+                    tension: 0.4
+                }]
+            } : null;
+
+            return (
+                <div className="bg-white rounded-xl shadow-lg p-6 space-y-8">
+                    <h2 className="text-2xl font-bold text-gray-800">📊 Gráficos de Progreso</h2>
+
+                    {historicalData.length === 0 && (
+                        <div className="text-center py-8 text-gray-600">
+                            <p>Completa y archiva algunas semanas para ver tus gráficos de progreso.</p>
+                        </div>
+                    )}
+
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                        {/* Gráfico 1: Peso y Cintura */}
+                        {weightWaistChartData && (
+                            <SimpleChart
+                                type="line"
+                                data={weightWaistChartData}
+                                title="Evolución de Peso y Cintura"
+                            />
+                        )}
+
+                        {/* Gráfico 2: Calidad Alimenticia */}
+                        {foodQualityChartData && (
+                            <SimpleChart
+                                type="bar"
+                                data={foodQualityChartData}
+                                title="Índice de Calidad Alimenticia"
+                            />
+                        )}
+
+                        {/* Gráfico 3: Distribución de Comidas */}
+                        {foodDistributionChartData && (
+                            <SimpleChart
+                                type="doughnut"
+                                data={foodDistributionChartData}
+                                title="Distribución Semanal de Comidas"
+                            />
+                        )}
+
+                        {/* Gráfico 4: Hidratación Semanal */}
+                        <SimpleChart
+                            type="bar"
+                            data={hydrationChartData}
+                            title="Hidratación Semanal"
+                        />
+
+                        {/* Gráfico 5: IMC */}
+                        {bmiChartData && (
+                            <div className="lg:col-span-2">
+                                <SimpleChart
+                                    type="line"
+                                    data={bmiChartData}
+                                    title="Evolución del IMC"
+                                />
+                                <div className="mt-4 flex justify-center gap-6 text-sm">
+                                    <div className="flex items-center gap-2">
+                                        <div className="w-4 h-4 bg-green-500 rounded"></div>
+                                        <span>Normal (18.5-24.9)</span>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <div className="w-4 h-4 bg-yellow-500 rounded"></div>
+                                        <span>Sobrepeso (25-29.9)</span>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <div className="w-4 h-4 bg-orange-500 rounded"></div>
+                                        <span>Obesidad (30+)</span>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        // Componente Principal
+        function App() {
+            const [currentWeek, setCurrentWeek] = useLocalStorage('wellness_currentWeek', getInitialWeekData());
+            const [historicalData, setHistoricalData] = useLocalStorage('wellness_historical', []);
+            const [userConfig, setUserConfig] = useLocalStorage('wellness_config', { estatura: '', nombre: '' });
+
+            // Sistema de navegación de páginas
+            const [currentPage, setCurrentPage] = useState('home'); // 'home', 'stats', 'charts'
+
+            // Obtener día actual de la semana
+            const getCurrentDayName = () => {
+                const days = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'];
+                return days[new Date().getDay()];
+            };
+
+            const [selectedDay, setSelectedDay] = useState(getCurrentDayName());
+
+            // Actualizar día específico
+            const updateDay = (dayName, newData) => {
+                setCurrentWeek(prev => ({
+                    ...prev,
+                    [dayName]: newData
+                }));
+            };
+
+            // Actualizar mediciones
+            const updateMeasurements = (field, value) => {
+                setCurrentWeek(prev => ({
+                    ...prev,
+                    [field]: value
+                }));
+            };
+
+            // Calcular estadísticas semanales
+            const weeklyStats = useMemo(() => {
+                const foodQuality = calculateFoodQuality(currentWeek);
+
+                let trainings = 0;
+                ['lunes', 'martes', 'jueves', 'viernes'].forEach(day => {
+                    if (currentWeek[day].ejercicio) trainings++;
+                });
+
+                let totalWater = 0;
+                ['lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado', 'domingo'].forEach(day => {
+                    totalWater += currentWeek[day].vasos;
+                });
+
+                const bmi = calculateBMI(parseFloat(currentWeek.peso), parseFloat(currentWeek.estatura || userConfig.estatura));
+
+                return {
+                    foodQuality,
+                    trainings,
+                    totalWater,
+                    bmi,
+                    bmiCategory: getBMICategory(bmi),
+                    historicalCount: historicalData.length
+                };
+            }, [currentWeek, historicalData, userConfig]);
+
+            const foodQualityMsg = getFoodQualityMessage(weeklyStats.foodQuality);
+
+            // Nueva semana
+            const startNewWeek = () => {
+                if (!confirm('¿Deseas archivar la semana actual e iniciar una nueva?')) return;
+
+                const weekToArchive = {
+                    ...currentWeek,
+                    archivedDate: new Date().toISOString()
+                };
+
+                setHistoricalData(prev => [...prev, weekToArchive]);
+                setCurrentWeek(getInitialWeekData());
+                alert('Semana archivada exitosamente. ¡Comienza una nueva semana!');
+            };
+
+            // Exportar CSV
+            const exportCSV = () => {
+                const allWeeks = [...historicalData, currentWeek];
+                const rows = [];
+
+                // Header
+                rows.push('Semana,Año,Fecha Inicio,Peso (kg),Cintura (cm),IMC,Día,Tipo Día,Ejercicio,Pausa 10am,Pausa 3pm,Familia,Sueño,Desayuno,Almuerzo,Cena,Vasos Agua,Índice Calidad');
+
+                allWeeks.forEach(week => {
+                    const weekQuality = calculateFoodQuality(week);
+                    const bmi = calculateBMI(parseFloat(week.peso), parseFloat(week.estatura || userConfig.estatura));
+
+                    ['lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado', 'domingo'].forEach(day => {
+                        const d = week[day];
+                        rows.push([
+                            week.weekNumber,
+                            week.year,
+                            new Date(week.startDate).toLocaleDateString(),
+                            week.peso || '',
+                            week.cintura || '',
+                            bmi || '',
+                            day,
+                            d.tipo,
+                            d.ejercicio ? 'Sí' : 'No',
+                            d.pausa1 ? 'Sí' : 'No',
+                            d.pausa2 ? 'Sí' : 'No',
+                            d.familia ? 'Sí' : 'No',
+                            d.sueno ? 'Sí' : 'No',
+                            d.desayuno,
+                            d.almuerzo,
+                            d.cena,
+                            d.vasos,
+                            weekQuality
+                        ].join(','));
+                    });
+                });
+
+                const csvContent = rows.join('\n');
+                const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = `wellness_data_${new Date().toISOString().split('T')[0]}.csv`;
+                link.click();
+                alert('CSV exportado exitosamente');
+            };
+
+            // Backup JSON
+            const backupJSON = () => {
+                const backup = {
+                    exportDate: new Date().toISOString(),
+                    currentWeek,
+                    historicalData,
+                    userConfig
+                };
+
+                const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = `wellness_backup_${new Date().toISOString().split('T')[0]}.json`;
+                link.click();
+                alert('Backup JSON creado exitosamente');
+            };
+
+            // Importar JSON
+            const importJSON = (event) => {
+                const file = event.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        const data = JSON.parse(e.target.result);
+                        if (!data.currentWeek || !data.historicalData) {
+                            throw new Error('Formato JSON inválido');
+                        }
+
+                        if (!confirm('¿Deseas importar estos datos? Los datos actuales serán reemplazados.')) return;
+
+                        setCurrentWeek(data.currentWeek);
+                        setHistoricalData(data.historicalData);
+                        if (data.userConfig) setUserConfig(data.userConfig);
+                        alert('Datos importados exitosamente');
+                    } catch (error) {
+                        alert('Error al importar: ' + error.message);
+                    }
+                };
+                reader.readAsText(file);
+                event.target.value = '';
+            };
+
+            // Renderizar páginas según navegación
+            const renderPage = () => {
+                switch(currentPage) {
+                    case 'stats':
+                        return (
+                            <div className="max-w-7xl mx-auto px-4 py-6">
+                                <MonthlyStatsPanel
+                                    currentWeek={currentWeek}
+                                    historicalData={historicalData}
+                                    userConfig={userConfig}
+                                />
+                            </div>
+                        );
+
+                    case 'charts':
+                        return (
+                            <div className="max-w-7xl mx-auto px-4 py-6">
+                                <ChartsPanel
+                                    currentWeek={currentWeek}
+                                    historicalData={historicalData}
+                                    userConfig={userConfig}
+                                />
+                            </div>
+                        );
+
+                    case 'home':
+                    default:
+                        return (
+                            <main className="max-w-3xl mx-auto px-4 py-6">
+                                {/* Selector de Día */}
+                                <DaySelector
+                                    selectedDay={selectedDay}
+                                    onDayChange={setSelectedDay}
+                                />
+
+                                {/* Tarjeta del Día Seleccionado */}
+                                <DayCard
+                                    key={selectedDay}
+                                    dayName={selectedDay}
+                                    dayData={currentWeek[selectedDay]}
+                                    onChange={(newData) => updateDay(selectedDay, newData)}
+                                />
+                            </main>
+                        );
+                }
+            };
+
+            return (
+                <div className="main-container bg-gray-50">
+                    {/* Header con Navegación - COMPACTO */}
+                    <header className="bg-white shadow-md">
+                        <div className="max-w-7xl mx-auto px-4 py-3 space-y-3">
+                            {/* Título y Navegación en una línea */}
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                    {currentPage !== 'home' && (
+                                        <Button
+                                            variant="secondary"
+                                            onClick={() => setCurrentPage('home')}
+                                            className="px-3 py-2 text-sm"
+                                            ariaLabel="Ir a inicio"
+                                        >
+                                            🏠
+                                        </Button>
+                                    )}
+                                    <div>
+                                        <h1 className="text-2xl font-bold text-gray-800">✨ Estilo de vida</h1>
+                                        <p className="text-xs text-gray-600">Semana {currentWeek.weekNumber}</p>
+                                    </div>
+                                </div>
+
+                                {/* Navegación Principal - compacta */}
+                                <div className="flex gap-2">
+                                    <Button
+                                        variant={currentPage === 'home' ? 'primary' : 'secondary'}
+                                        onClick={() => setCurrentPage('home')}
+                                        className="px-3 py-2 text-sm"
+                                    >
+                                        📅 Día
+                                    </Button>
+                                    <Button
+                                        variant={currentPage === 'stats' ? 'primary' : 'secondary'}
+                                        onClick={() => setCurrentPage('stats')}
+                                        className="px-3 py-2 text-sm"
+                                    >
+                                        📈 Stats
+                                    </Button>
+                                    <Button
+                                        variant={currentPage === 'charts' ? 'primary' : 'secondary'}
+                                        onClick={() => setCurrentPage('charts')}
+                                        className="px-3 py-2 text-sm"
+                                    >
+                                        📊 Gráficos
+                                    </Button>
+                                </div>
+                            </div>
+
+                            {/* Resumen Semanal - Compacto */}
+                            <div className="grid grid-cols-4 gap-2">
+                                <div className="bg-gradient-to-br from-green-100 to-green-200 rounded-lg p-2 text-center">
+                                    <div className="text-xl font-bold text-green-700">{weeklyStats.foodQuality}%</div>
+                                    <div className="text-xs text-green-600">{foodQualityMsg.emoji}</div>
+                                </div>
+                                <div className="bg-gradient-to-br from-blue-100 to-blue-200 rounded-lg p-2 text-center">
+                                    <div className="text-xl font-bold text-blue-700">{weeklyStats.trainings}/4</div>
+                                    <div className="text-xs text-blue-600">Entrenos</div>
+                                </div>
+                                <div className="bg-gradient-to-br from-cyan-100 to-cyan-200 rounded-lg p-2 text-center">
+                                    <div className="text-xl font-bold text-cyan-700">{weeklyStats.totalWater}</div>
+                                    <div className="text-xs text-cyan-600">Agua</div>
+                                </div>
+                                <div className="bg-gradient-to-br from-orange-100 to-orange-200 rounded-lg p-2 text-center">
+                                    <div className="text-xl font-bold text-orange-700">{weeklyStats.bmi || '-'}</div>
+                                    <div className="text-xs text-orange-600">IMC</div>
+                                </div>
+                            </div>
+
+                            {/* Mediciones y Acciones - Una línea compacta (solo en home) */}
+                            {currentPage === 'home' && (
+                                <div className="flex items-center justify-between gap-2 text-sm border-t border-gray-200 pt-2">
+                                    <div className="flex gap-2 flex-1">
+                                        <input
+                                            type="number"
+                                            value={currentWeek.peso}
+                                            onChange={(e) => updateMeasurements('peso', e.target.value)}
+                                            placeholder="Peso"
+                                            step="0.1"
+                                            className="w-20 px-2 py-1 border rounded text-sm"
+                                            aria-label="Peso en kg"
+                                        />
+                                        <input
+                                            type="number"
+                                            value={currentWeek.cintura}
+                                            onChange={(e) => updateMeasurements('cintura', e.target.value)}
+                                            placeholder="Cintura"
+                                            step="0.5"
+                                            className="w-20 px-2 py-1 border rounded text-sm"
+                                            aria-label="Cintura en cm"
+                                        />
+                                        <input
+                                            type="number"
+                                            value={currentWeek.estatura || userConfig.estatura}
+                                            onChange={(e) => {
+                                                const val = e.target.value;
+                                                updateMeasurements('estatura', val);
+                                                setUserConfig(prev => ({ ...prev, estatura: val }));
+                                            }}
+                                            placeholder="Altura"
+                                            className="w-20 px-2 py-1 border rounded text-sm"
+                                            aria-label="Estatura en cm"
+                                        />
+                                    </div>
+                                    <div className="flex gap-1">
+                                        <button onClick={exportCSV} className="px-2 py-1 bg-blue-500 text-white rounded text-xs hover:bg-blue-600" title="Exportar CSV">
+                                            📊
+                                        </button>
+                                        <button onClick={backupJSON} className="px-2 py-1 bg-gray-500 text-white rounded text-xs hover:bg-gray-600" title="Backup">
+                                            💾
+                                        </button>
+                                        <label className="cursor-pointer px-2 py-1 bg-gray-500 text-white rounded text-xs hover:bg-gray-600" title="Importar">
+                                            📥
+                                            <input type="file" accept=".json" onChange={importJSON} className="hidden" />
+                                        </label>
+                                        <button onClick={startNewWeek} className="px-2 py-1 bg-green-500 text-white rounded text-xs hover:bg-green-600" title="Nueva Semana">
+                                            ✨
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </header>
+
+                    {/* Contenido de la página actual */}
+                    <div className="content-area">
+                        {renderPage()}
+                    </div>
+
+                    {/* Footer */}
+                    <footer className="bg-gray-800 text-white mt-12 py-8">
+                        <div className="max-w-7xl mx-auto px-4 text-center space-y-4">
+                            <h3 className="text-xl font-bold">📋 Instrucciones de Uso</h3>
+                            <div className="grid md:grid-cols-3 gap-6 text-sm text-left">
+                                <div>
+                                    <h4 className="font-semibold text-blue-300 mb-2">Lunes por la mañana</h4>
+                                    <ul className="space-y-1 text-gray-300">
+                                        <li>• Pesarse en ayunas</li>
+                                        <li>• Medir cintura</li>
+                                        <li>• Ingresar valores</li>
+                                    </ul>
+                                </div>
+                                <div>
+                                    <h4 className="font-semibold text-green-300 mb-2">Durante la semana</h4>
+                                    <ul className="space-y-1 text-gray-300">
+                                        <li>• Marcar actividades diarias</li>
+                                        <li>• Calificar comidas</li>
+                                        <li>• Registrar vasos de agua</li>
+                                    </ul>
+                                </div>
+                                <div>
+                                    <h4 className="font-semibold text-purple-300 mb-2">Fin de semana</h4>
+                                    <ul className="space-y-1 text-gray-300">
+                                        <li>• Revisar progreso</li>
+                                        <li>• Exportar datos (mensual)</li>
+                                        <li>• Iniciar nueva semana (domingo noche)</li>
+                                    </ul>
+                                </div>
+                            </div>
+                            <p className="text-gray-400 text-xs pt-4">
+                                Dashboard de Bienestar Personal • Datos almacenados localmente
+                            </p>
+                        </div>
+                    </footer>
+                </div>
+            );
+        }
+
+        // Renderizar la app (React 18)
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
