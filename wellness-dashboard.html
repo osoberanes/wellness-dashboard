@@ -172,13 +172,18 @@
                     try {
                         if (tableName === 'wellness_currentWeek') {
                             const dbData = appToDbFormat(value, userId);
-                            const { error } = await supabase
+                            console.log('Guardando datos:', dbData);
+                            const { data, error } = await supabase
                                 .from('wellness_weeks')
                                 .upsert(dbData, {
                                     onConflict: 'user_id,week_number,year'
                                 });
 
-                            if (error) console.error('Error saving week:', error);
+                            if (error) {
+                                console.error('Error saving week:', error);
+                            } else {
+                                console.log('✅ Datos guardados exitosamente');
+                            }
                         } else if (tableName === 'wellness_config') {
                             const { error } = await supabase
                                 .from('wellness_config')
@@ -500,7 +505,29 @@
         }
 
         // Selector de Día (HIG compliant)
-        function DaySelector({ selectedDay, onDayChange }) {
+        function DaySelector({ selectedDay, onDayChange, currentWeek }) {
+            // Calcular fechas de la semana basado en startDate
+            const getWeekDates = () => {
+                const startDate = new Date(currentWeek.startDate);
+                const dates = {};
+
+                // Ajustar al lunes de la semana
+                const day = startDate.getDay();
+                const diff = startDate.getDate() - day + (day === 0 ? -6 : 1);
+                const monday = new Date(startDate.setDate(diff));
+
+                const dayNames = ['lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado', 'domingo'];
+                dayNames.forEach((dayName, index) => {
+                    const date = new Date(monday);
+                    date.setDate(monday.getDate() + index);
+                    dates[dayName] = date;
+                });
+
+                return dates;
+            };
+
+            const weekDates = getWeekDates();
+
             const days = [
                 { key: 'lunes', label: 'Lunes', icon: '🏊' },
                 { key: 'martes', label: 'Martes', icon: '💪' },
@@ -512,6 +539,7 @@
             ];
 
             const currentIndex = days.findIndex(d => d.key === selectedDay);
+            const selectedDate = weekDates[selectedDay];
 
             const goToPrevDay = () => {
                 const newIndex = currentIndex === 0 ? 6 : currentIndex - 1;
@@ -541,6 +569,13 @@
                             <h2 className="text-2xl font-bold text-gray-800">
                                 {days[currentIndex].label}
                             </h2>
+                            <p className="text-sm text-gray-600 mt-1">
+                                {selectedDate.toLocaleDateString('es-ES', {
+                                    day: 'numeric',
+                                    month: 'long',
+                                    year: 'numeric'
+                                })}
+                            </p>
                         </div>
 
                         <Button
@@ -704,19 +739,21 @@
                         </div>
                     )}
 
-                    {/* Pausas */}
-                    <div className="space-y-2 pt-3 border-t border-gray-200">
-                        <CheckboxToggle
-                            checked={dayData.pausa1}
-                            onChange={(val) => handleChange('pausa1', val)}
-                            label="⏰ Pausa 10am"
-                        />
-                        <CheckboxToggle
-                            checked={dayData.pausa2}
-                            onChange={(val) => handleChange('pausa2', val)}
-                            label="⏰ Pausa 3pm"
-                        />
-                    </div>
+                    {/* Pausas (solo días de semana) */}
+                    {dayName !== 'sabado' && dayName !== 'domingo' && (
+                        <div className="space-y-2 pt-3 border-t border-gray-200">
+                            <CheckboxToggle
+                                checked={dayData.pausa1}
+                                onChange={(val) => handleChange('pausa1', val)}
+                                label="⏰ Pausa 10am"
+                            />
+                            <CheckboxToggle
+                                checked={dayData.pausa2}
+                                onChange={(val) => handleChange('pausa2', val)}
+                                label="⏰ Pausa 3pm"
+                            />
+                        </div>
+                    )}
 
                     {/* Alimentación */}
                     <div className="space-y-2 pt-3 border-t border-gray-200">
@@ -1854,6 +1891,7 @@
                                 <DaySelector
                                     selectedDay={selectedDay}
                                     onDayChange={setSelectedDay}
+                                    currentWeek={currentWeek}
                                 />
 
                                 {/* Tarjeta del Día Seleccionado */}
