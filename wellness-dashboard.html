@@ -1627,6 +1627,34 @@
             const [currentPage, setCurrentPage] = useState('home');
             const [selectedDay, setSelectedDay] = useState(getCurrentDayName());
 
+            // Calcular estadísticas semanales (useMemo MUST be before returns)
+            const weeklyStats = useMemo(() => {
+                if (!currentWeek) return { foodQuality: 0, trainings: 0, totalWater: 0, bmi: null, bmiCategory: '', historicalCount: 0 };
+
+                const foodQuality = calculateFoodQuality(currentWeek);
+
+                let trainings = 0;
+                ['lunes', 'martes', 'jueves', 'viernes'].forEach(day => {
+                    if (currentWeek[day]?.ejercicio) trainings++;
+                });
+
+                let totalWater = 0;
+                ['lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado', 'domingo'].forEach(day => {
+                    totalWater += currentWeek[day]?.vasos || 0;
+                });
+
+                const bmi = calculateBMI(parseFloat(currentWeek.peso), parseFloat(currentWeek.estatura || userConfig.estatura));
+
+                return {
+                    foodQuality,
+                    trainings,
+                    totalWater,
+                    bmi,
+                    bmiCategory: getBMICategory(bmi),
+                    historicalCount: historicalData?.length || 0
+                };
+            }, [currentWeek, historicalData, userConfig]);
+
             // Logout function
             const handleLogout = async () => {
                 await supabase.auth.signOut();
@@ -1677,32 +1705,6 @@
                     [field]: value
                 }));
             };
-
-            // Calcular estadísticas semanales
-            const weeklyStats = useMemo(() => {
-                const foodQuality = calculateFoodQuality(currentWeek);
-
-                let trainings = 0;
-                ['lunes', 'martes', 'jueves', 'viernes'].forEach(day => {
-                    if (currentWeek[day].ejercicio) trainings++;
-                });
-
-                let totalWater = 0;
-                ['lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado', 'domingo'].forEach(day => {
-                    totalWater += currentWeek[day].vasos;
-                });
-
-                const bmi = calculateBMI(parseFloat(currentWeek.peso), parseFloat(currentWeek.estatura || userConfig.estatura));
-
-                return {
-                    foodQuality,
-                    trainings,
-                    totalWater,
-                    bmi,
-                    bmiCategory: getBMICategory(bmi),
-                    historicalCount: historicalData.length
-                };
-            }, [currentWeek, historicalData, userConfig]);
 
             const foodQualityMsg = getFoodQualityMessage(weeklyStats.foodQuality);
 
