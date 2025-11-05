@@ -204,48 +204,6 @@
             return [value, setValue, loading];
         }
 
-        // Convertir formato DB a formato App
-        function dbToAppFormat(dbWeek) {
-            return {
-                weekNumber: dbWeek.week_number,
-                year: dbWeek.year,
-                startDate: dbWeek.start_date,
-                peso: dbWeek.peso || '',
-                cintura: dbWeek.cintura || '',
-                estatura: dbWeek.estatura || '',
-                lunes: dbWeek.lunes || getInitialDayData('lunes'),
-                martes: dbWeek.martes || getInitialDayData('martes'),
-                miercoles: dbWeek.miercoles || getInitialDayData('miercoles'),
-                jueves: dbWeek.jueves || getInitialDayData('jueves'),
-                viernes: dbWeek.viernes || getInitialDayData('viernes'),
-                sabado: dbWeek.sabado || getInitialDayData('sabado'),
-                domingo: dbWeek.domingo || getInitialDayData('domingo'),
-                archivedDate: dbWeek.archived_date
-            };
-        }
-
-        // Convertir formato App a formato DB
-        function appToDbFormat(appWeek, userId) {
-            return {
-                user_id: userId,
-                week_number: appWeek.weekNumber,
-                year: appWeek.year,
-                start_date: appWeek.startDate,
-                peso: appWeek.peso || null,
-                cintura: appWeek.cintura || null,
-                estatura: appWeek.estatura || null,
-                lunes: appWeek.lunes,
-                martes: appWeek.martes,
-                miercoles: appWeek.miercoles,
-                jueves: appWeek.jueves,
-                viernes: appWeek.viernes,
-                sabado: appWeek.sabado,
-                domingo: appWeek.domingo,
-                archived_date: appWeek.archivedDate || null,
-                updated_at: new Date().toISOString()
-            };
-        }
-
         // ============================================
         // UTILIDADES
         // ============================================
@@ -337,6 +295,48 @@
                 viernes: getInitialDayData('fuerza'),
                 sabado: getInitialDayData('finDeSemana'),
                 domingo: getInitialDayData('finDeSemana')
+            };
+        }
+
+        // Convertir formato DB a formato App
+        function dbToAppFormat(dbWeek) {
+            return {
+                weekNumber: dbWeek.week_number,
+                year: dbWeek.year,
+                startDate: dbWeek.start_date,
+                peso: dbWeek.peso || '',
+                cintura: dbWeek.cintura || '',
+                estatura: dbWeek.estatura || '',
+                lunes: dbWeek.lunes || getInitialDayData('natacion'),
+                martes: dbWeek.martes || getInitialDayData('fuerza'),
+                miercoles: dbWeek.miercoles || getInitialDayData('descanso'),
+                jueves: dbWeek.jueves || getInitialDayData('natacion'),
+                viernes: dbWeek.viernes || getInitialDayData('fuerza'),
+                sabado: dbWeek.sabado || getInitialDayData('finDeSemana'),
+                domingo: dbWeek.domingo || getInitialDayData('finDeSemana'),
+                archivedDate: dbWeek.archived_date
+            };
+        }
+
+        // Convertir formato App a formato DB
+        function appToDbFormat(appWeek, userId) {
+            return {
+                user_id: userId,
+                week_number: appWeek.weekNumber,
+                year: appWeek.year,
+                start_date: appWeek.startDate,
+                peso: appWeek.peso || null,
+                cintura: appWeek.cintura || null,
+                estatura: appWeek.estatura || null,
+                lunes: appWeek.lunes,
+                martes: appWeek.martes,
+                miercoles: appWeek.miercoles,
+                jueves: appWeek.jueves,
+                viernes: appWeek.viernes,
+                sabado: appWeek.sabado,
+                domingo: appWeek.domingo,
+                archived_date: appWeek.archivedDate || null,
+                updated_at: new Date().toISOString()
             };
         }
 
@@ -1617,6 +1617,16 @@
             const [historicalData, setHistoricalData, historyLoading] = useSupabase('wellness_historical', [], user?.id);
             const [userConfig, setUserConfig, configLoading] = useSupabase('wellness_config', { estatura: '', nombre: '' }, user?.id);
 
+            // Obtener día actual de la semana
+            const getCurrentDayName = () => {
+                const days = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'];
+                return days[new Date().getDay()];
+            };
+
+            // Sistema de navegación de páginas (MUST be declared before any returns)
+            const [currentPage, setCurrentPage] = useState('home');
+            const [selectedDay, setSelectedDay] = useState(getCurrentDayName());
+
             // Logout function
             const handleLogout = async () => {
                 await supabase.auth.signOut();
@@ -1651,17 +1661,6 @@
                     </div>
                 );
             }
-
-            // Sistema de navegación de páginas
-            const [currentPage, setCurrentPage] = useState('home'); // 'home', 'stats', 'charts'
-
-            // Obtener día actual de la semana
-            const getCurrentDayName = () => {
-                const days = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'];
-                return days[new Date().getDay()];
-            };
-
-            const [selectedDay, setSelectedDay] = useState(getCurrentDayName());
 
             // Actualizar día específico
             const updateDay = (dayName, newData) => {
