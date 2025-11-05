@@ -612,7 +612,7 @@
         }
 
         // Tarjeta de Día
-        function DayCard({ dayName, dayData, onChange }) {
+        function DayCard({ dayName, dayData, onChange, readOnly = false }) {
             const dayConfig = {
                 lunes: { icon: '🏊', activity: 'Natación 5:00 AM', exerciseGoal: 9 },
                 martes: { icon: '💪', activity: 'Fuerza 5:00 AM', exerciseGoal: 9 },
@@ -626,8 +626,12 @@
             const config = dayConfig[dayName];
             const displayName = dayName.charAt(0).toUpperCase() + dayName.slice(1);
 
-            // Handler para cambios con logging
+            // Handler para cambios con logging y validación readOnly
             const handleChange = (field, value) => {
+                if (readOnly) {
+                    alert('⚠️ No puedes editar fechas futuras');
+                    return;
+                }
                 console.log(`Updating ${dayName}.${field} to:`, value);
                 const newData = { ...dayData, [field]: value };
                 console.log('New data:', newData);
@@ -675,12 +679,13 @@
             const progress = calculateProgress();
 
             return (
-                <div className="bg-white rounded-lg shadow-md p-4 border border-gray-200">
+                <div className={`bg-white rounded-lg shadow-md p-4 border border-gray-200 ${readOnly ? 'opacity-70' : ''}`}>
                     {/* Header del día - Compacto */}
                     <div className="flex items-center justify-between pb-2 mb-3 border-b border-gray-200">
                         <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
                             <span className="text-xl">{config.icon}</span>
                             {displayName}
+                            {readOnly && <span className="text-xs bg-red-100 text-red-600 px-2 py-1 rounded">🔒 Solo lectura</span>}
                         </h3>
                         <div className="text-xl font-bold text-blue-600">{progress}%</div>
                     </div>
@@ -1664,6 +1669,104 @@
             const [currentPage, setCurrentPage] = useState('home');
             const [selectedDay, setSelectedDay] = useState(getCurrentDayName());
 
+            // Navegación de semanas - estado para la semana que estamos viendo
+            const [viewingWeekNumber, setViewingWeekNumber] = useState(currentWeek.weekNumber);
+            const [viewingYear, setViewingYear] = useState(currentWeek.year);
+
+            // Obtener la semana que estamos visualizando (actual o histórica)
+            const getViewingWeek = () => {
+                if (viewingWeekNumber === currentWeek.weekNumber && viewingYear === currentWeek.year) {
+                    return currentWeek;
+                }
+
+                // Buscar en histórico
+                const historical = historicalData.find(w =>
+                    w.weekNumber === viewingWeekNumber && w.year === viewingYear
+                );
+
+                if (historical) {
+                    return historical;
+                }
+
+                // Si no existe, crear semana vacía
+                const monday = getMonday(new Date(viewingYear, 0, 1 + (viewingWeekNumber - 1) * 7));
+                return {
+                    weekNumber: viewingWeekNumber,
+                    year: viewingYear,
+                    startDate: monday.toISOString(),
+                    peso: '',
+                    cintura: '',
+                    estatura: '',
+                    lunes: getInitialDayData('natacion'),
+                    martes: getInitialDayData('fuerza'),
+                    miercoles: getInitialDayData('descanso'),
+                    jueves: getInitialDayData('natacion'),
+                    viernes: getInitialDayData('fuerza'),
+                    sabado: getInitialDayData('finDeSemana'),
+                    domingo: getInitialDayData('finDeSemana')
+                };
+            };
+
+            const viewingWeek = getViewingWeek();
+
+            // Determinar si es una fecha futura
+            const isFutureWeek = () => {
+                const today = new Date();
+                const currentWeekNum = getWeekNumber(today);
+                const currentYearNum = today.getFullYear();
+
+                if (viewingYear > currentYearNum) return true;
+                if (viewingYear === currentYearNum && viewingWeekNumber > currentWeekNum) return true;
+                return false;
+            };
+
+            const isViewingFuture = isFutureWeek();
+
+            // Funciones de navegación de semanas
+            const goToPreviousWeek = () => {
+                if (viewingWeekNumber === 1) {
+                    setViewingWeekNumber(52);
+                    setViewingYear(viewingYear - 1);
+                } else {
+                    setViewingWeekNumber(viewingWeekNumber - 1);
+                }
+            };
+
+            const goToNextWeek = () => {
+                // No permitir avanzar si es semana futura
+                const today = new Date();
+                const currentWeekNum = getWeekNumber(today);
+                const currentYearNum = today.getFullYear();
+
+                let nextWeek = viewingWeekNumber + 1;
+                let nextYear = viewingYear;
+
+                if (nextWeek > 52) {
+                    nextWeek = 1;
+                    nextYear = viewingYear + 1;
+                }
+
+                // Validar que no sea futuro
+                if (nextYear > currentYearNum) return;
+                if (nextYear === currentYearNum && nextWeek > currentWeekNum) return;
+
+                setViewingWeekNumber(nextWeek);
+                setViewingYear(nextYear);
+            };
+
+            const goToCurrentWeek = () => {
+                setViewingWeekNumber(currentWeek.weekNumber);
+                setViewingYear(currentWeek.year);
+            };
+
+            // Función para obtener el lunes de una semana específica
+            function getMonday(d) {
+                d = new Date(d);
+                const day = d.getDay();
+                const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+                return new Date(d.setDate(diff));
+            }
+
             // Calcular estadísticas semanales (useMemo MUST be before returns)
             const weeklyStats = useMemo(() => {
                 if (!currentWeek) return { foodQuality: 0, trainings: 0, totalWater: 0, bmi: null, bmiCategory: '', historicalCount: 0 };
@@ -1729,18 +1832,72 @@
 
             // Actualizar día específico
             const updateDay = (dayName, newData) => {
-                setCurrentWeek(prev => ({
-                    ...prev,
-                    [dayName]: newData
-                }));
+                // Si estamos viendo la semana actual, actualizarla
+                if (viewingWeekNumber === currentWeek.weekNumber && viewingYear === currentWeek.year) {
+                    setCurrentWeek(prev => ({
+                        ...prev,
+                        [dayName]: newData
+                    }));
+                } else {
+                    // Si estamos viendo una semana histórica, actualizar el histórico
+                    setHistoricalData(prev => {
+                        const index = prev.findIndex(w =>
+                            w.weekNumber === viewingWeekNumber && w.year === viewingYear
+                        );
+
+                        if (index !== -1) {
+                            // Actualizar semana existente
+                            const updated = [...prev];
+                            updated[index] = {
+                                ...updated[index],
+                                [dayName]: newData
+                            };
+                            return updated;
+                        } else {
+                            // Crear nueva semana histórica
+                            const newWeek = {
+                                ...getViewingWeek(),
+                                [dayName]: newData
+                            };
+                            return [...prev, newWeek];
+                        }
+                    });
+                }
             };
 
             // Actualizar mediciones
             const updateMeasurements = (field, value) => {
-                setCurrentWeek(prev => ({
-                    ...prev,
-                    [field]: value
-                }));
+                // Si estamos viendo la semana actual, actualizarla
+                if (viewingWeekNumber === currentWeek.weekNumber && viewingYear === currentWeek.year) {
+                    setCurrentWeek(prev => ({
+                        ...prev,
+                        [field]: value
+                    }));
+                } else {
+                    // Si estamos viendo una semana histórica, actualizar el histórico
+                    setHistoricalData(prev => {
+                        const index = prev.findIndex(w =>
+                            w.weekNumber === viewingWeekNumber && w.year === viewingYear
+                        );
+
+                        if (index !== -1) {
+                            // Actualizar semana existente
+                            const updated = [...prev];
+                            updated[index] = {
+                                ...updated[index],
+                                [field]: value
+                            };
+                            return updated;
+                        } else {
+                            // Crear nueva semana histórica
+                            const newWeek = {
+                                ...getViewingWeek(),
+                                [field]: value
+                            };
+                            return [...prev, newWeek];
+                        }
+                    });
+                }
             };
 
             const foodQualityMsg = getFoodQualityMessage(weeklyStats.foodQuality);
@@ -1891,15 +2048,16 @@
                                 <DaySelector
                                     selectedDay={selectedDay}
                                     onDayChange={setSelectedDay}
-                                    currentWeek={currentWeek}
+                                    currentWeek={viewingWeek}
                                 />
 
                                 {/* Tarjeta del Día Seleccionado */}
                                 <DayCard
-                                    key={selectedDay}
+                                    key={`${selectedDay}-${viewingWeekNumber}-${viewingYear}`}
                                     dayName={selectedDay}
-                                    dayData={currentWeek[selectedDay]}
+                                    dayData={viewingWeek[selectedDay]}
                                     onChange={(newData) => updateDay(selectedDay, newData)}
+                                    readOnly={isViewingFuture}
                                 />
                             </main>
                         );
@@ -1922,12 +2080,38 @@
                                             🏠 Home
                                         </Button>
                                     )}
-                                    <div>
+                                    <div className="flex-1">
                                         <h1 className="text-4xl font-bold text-gray-800">✨ Estilo de vida</h1>
                                         <p className="text-sm text-gray-600">
-                                            Semana {currentWeek.weekNumber}
+                                            Semana {viewingWeekNumber} - {viewingYear}
                                             {user && <span className="ml-3 text-blue-600">• {user.email}</span>}
+                                            {isViewingFuture && <span className="ml-2 text-red-600">• Fecha futura (solo lectura)</span>}
                                         </p>
+
+                                        {/* Navegación de semanas */}
+                                        <div className="flex gap-2 mt-2">
+                                            <button
+                                                onClick={goToPreviousWeek}
+                                                className="px-3 py-1 text-xs bg-gray-200 hover:bg-gray-300 rounded transition-colors"
+                                            >
+                                                ← Semana anterior
+                                            </button>
+                                            {(viewingWeekNumber !== currentWeek.weekNumber || viewingYear !== currentWeek.year) && (
+                                                <button
+                                                    onClick={goToCurrentWeek}
+                                                    className="px-3 py-1 text-xs bg-blue-500 hover:bg-blue-600 text-white rounded transition-colors"
+                                                >
+                                                    Ir a semana actual
+                                                </button>
+                                            )}
+                                            <button
+                                                onClick={goToNextWeek}
+                                                disabled={isViewingFuture}
+                                                className="px-3 py-1 text-xs bg-gray-200 hover:bg-gray-300 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                            >
+                                                Semana siguiente →
+                                            </button>
+                                        </div>
                                     </div>
                                     {user && (
                                         <button
