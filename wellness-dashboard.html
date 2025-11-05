@@ -1612,18 +1612,10 @@
                 return () => subscription.unsubscribe();
             }, []);
 
-            // Datos del usuario (usar Supabase si está autenticado, localStorage si no)
-            const [currentWeek, setCurrentWeek, weekLoading] = user
-                ? useSupabase('wellness_currentWeek', getInitialWeekData(), user.id)
-                : [useLocalStorage('wellness_currentWeek', getInitialWeekData())[0], useLocalStorage('wellness_currentWeek', getInitialWeekData())[1], false];
-
-            const [historicalData, setHistoricalData, historyLoading] = user
-                ? useSupabase('wellness_historical', [], user.id)
-                : [useLocalStorage('wellness_historical', [])[0], useLocalStorage('wellness_historical', [])[1], false];
-
-            const [userConfig, setUserConfig, configLoading] = user
-                ? useSupabase('wellness_config', { estatura: '', nombre: '' }, user.id)
-                : [useLocalStorage('wellness_config', { estatura: '', nombre: '' })[0], useLocalStorage('wellness_config', { estatura: '', nombre: '' })[1], false];
+            // Datos del usuario (usar Supabase si está autenticado)
+            const [currentWeek, setCurrentWeek, weekLoading] = useSupabase('wellness_currentWeek', getInitialWeekData(), user?.id);
+            const [historicalData, setHistoricalData, historyLoading] = useSupabase('wellness_historical', [], user?.id);
+            const [userConfig, setUserConfig, configLoading] = useSupabase('wellness_config', { estatura: '', nombre: '' }, user?.id);
 
             // Logout function
             const handleLogout = async () => {
